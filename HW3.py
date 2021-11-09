@@ -13,7 +13,7 @@ from scipy.io import wavfile
 import matplotlib.pyplot as plt
 
 
-def  block_audio(x,blockSize,hopSize,fs):
+def block_audio(x,blockSize,hopSize,fs):
     # allocate memory
     numBlocks = math.ceil(x.size / hopSize)
     xb = np.zeros([numBlocks, blockSize])
@@ -69,5 +69,32 @@ def track_pitch_fftmax(x, blockSize, hopSize, fs):
     f0 = fInHz[maxNdx]
     
     return f0, timeInSec
+
+
+def get_f0_from_Hps(X, fs, order):
+    nyquist = fs / 2
+    f0 = np.zeros(X.shape[1])
+    for i, block in enumerate(X.T):
+        hps = block
+        for j in range(2, order+1):
+            down_sampled = block[::j]
+            hps[:len(down_sampled)] *= down_sampled
+
+        freq_ind = np.argmax(hps)
+        freq = nyquist * freq_ind / (X.shape[0]) - 1
+        f0[i] = freq
+
+    return f0
+
+def track_pitch_hps(x, blockSize, hopSize, fs):
+    xb, timeInSec = block_audio(x, blockSize, hopSize, fs)
+    X, fInHz = compute_spectrogram(xb, fs)
+    f0 = get_f0_from_Hps(X, fs, order=4)
+
+    return f0, timeInSec
+
+
+
+    return f0
 
     
