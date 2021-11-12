@@ -11,6 +11,8 @@ import scipy as sp
 from scipy.fft import fft
 from scipy.io import wavfile
 import matplotlib.pyplot as plt
+import os
+
 
 
 def block_audio(x,blockSize,hopSize,fs):
@@ -94,7 +96,55 @@ def track_pitch_hps(x, blockSize, hopSize, fs):
     return f0, timeInSec
 
 
+def extract_rms(xb):
+    # number of results
+    numBlocks = xb.shape[0]
+    # allocate memory
+    vrms = np.zeros(numBlocks)
+    for n in range(0, numBlocks):
+        # calculate the rms
+        vrms[n] = np.sqrt(np.dot(xb[n,:], xb[n,:]) / xb.shape[1])
+    # convert to dB
+    epsilon = 1e-5  # -100dB
+    vrms[vrms < epsilon] = epsilon
+    rmsDb = 20 * np.log10(1/vrms)
+    
+    return (rmsDb)    
 
-    return f0
+def create_voicing_mask(rmsDb, thresholdDb):
+    
+    mask = np.argwhere(rmsDb <= thresholdDb)
+    
+    return mask
+
+def apply_voicing_mask(f0, mask):
+    
+    f0Adj = f0
+    f0Adj[mask] = 0
+    
+    return f0Adj
+
+def eval_voiced_fp(estimation, annotation):
+    
+    denomenator_mask = np.argwhere(annotation == 0)
+    denomenator = len(denomenator_mask)
+    numerator = estimation[denomenator_mask]
+    numerator = len(np.argwhere(numerator != 0))
+    
+    pfp = (numerator / denomenator) * 100
+    
+    return pfp
+
+def eval_voiced_fn(estimation, annotation):
+    
+    denomenator_mask = np.argwhere(annotation != 0)
+    denomenator = len(denomenator_mask)
+    numerator = estimation[denomenator_mask]
+    numerator = len(np.argwhere(numerator == 0))
+    
+    pfn = (numerator / denomenator) * 100
+    
+    return pfn
+
 
     
