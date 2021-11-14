@@ -10,7 +10,7 @@ import math
 import scipy as sp
 from scipy.fftpack import fft
 from scipy.io import wavfile
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_prominences
 import matplotlib.pyplot as plt
 import os
 
@@ -53,6 +53,7 @@ def compute_spectrogram(xb, fs):
 
     return X, fInHz
 
+
 def track_pitch_fftmax(x, blockSize, hopSize, fs):
     # Block Audio Input
     xb, timeInSec = block_audio(x, blockSize, hopSize, fs)
@@ -76,7 +77,7 @@ def track_pitch_fftmax(x, blockSize, hopSize, fs):
     #f0 = fInHz[maxNdx]
 
     nyquist = fs/2
-    f0 = nyquist * maxNdx / X.shape[0] - 1
+    f0 = nyquist * maxNdx / (X.shape[0] - 1)
     
     return f0, timeInSec
 
@@ -91,7 +92,7 @@ def get_f0_from_Hps(X, fs, order):
             hps[:len(down_sampled)] *= down_sampled
 
         freq_ind = np.argmax(hps)
-        freq = nyquist * freq_ind / (X.shape[0]) - 1
+        freq = nyquist * freq_ind / ((X.shape[0]) - 1)
         f0[i] = freq
 
     return f0
@@ -103,9 +104,8 @@ def track_pitch_hps(x, blockSize, hopSize, fs):
 
     return f0, timeInSec
 
-def comp_acf(inputVector, blsNormalized=False):
+def comp_acf(inputVector, blsNormalized=True):
     inputVector = np.concatenate([np.zeros(len(inputVector)), inputVector])
-    # as discussed in class, autocorrelation in the time domain is multiplication with complex conjugate in freq domain
     freq = np.fft.fft(inputVector)
     r_freq = freq * np.conjugate(freq)
     r = np.fft.ifft(r_freq).real
@@ -113,15 +113,19 @@ def comp_acf(inputVector, blsNormalized=False):
 
     if blsNormalized:
         r = r / np.max(np.abs(r))
+
     return r
 
 
 def get_f0_from_acf(r, fs):
     peaks, _ = find_peaks(r)
-
-    T = np.min(peaks) / fs
+    proms = peak_prominences(r, peaks)[0]
+    max_prom = np.max(proms)
+    ind = np.where(proms==max_prom)
+    T = peaks[ind] / fs
     f0 = 1 / T
     return f0
+
 
 def track_pitch_acf(x, blockSize, hopSize, fs):
     xb, timeInSec = block_audio(x, blockSize, hopSize, fs)
@@ -130,6 +134,7 @@ def track_pitch_acf(x, blockSize, hopSize, fs):
         r = comp_acf(block)
         f0[i] = get_f0_from_acf(r, fs)
     return f0, timeInSec
+
 
 def extract_rms(xb):
     # number of results
@@ -147,15 +152,29 @@ def extract_rms(xb):
     return (rmsDb)    
 
 def create_voicing_mask(rmsDb, thresholdDb):
-    
-    mask = np.argwhere(rmsDb <= thresholdDb)
+    mask = rmsDb <= thresholdDb
+    thresh_line = np.ones(rmsDb.shape[0]) * thresholdDb
+
+    fig, axs = plt.subplots(2)
+    axs[0].plot(rmsDb)
+    axs[0].plot(thresh_line)
+    axs[0].set_title("RMS")
+    axs[1].plot(mask)
+    axs[1].set_title(("Mask with threshold:" + str(thresholdDb)))
+    plt.show()
+
+    #mask = np.argwhere(rmsDb <= thresholdDb)
     
     return mask
 
 def apply_voicing_mask(f0, mask):
     
-    f0Adj = f0
-    f0Adj[mask] = 0
+    f0Adj = np.multiply(f0, mask)
+
+    #print("mask shape:", mask.shape)
+    #print("f0Adj shape:", f0Adj.shape)
+
+    #f0Adj[mask] = 0
     
     return f0Adj
 
@@ -184,10 +203,10 @@ def eval_voiced_fn(estimation, annotation):
 
 def eval_pitchtrack_v2(estimation, annotation):
     cents = []
-    eps = 1e-5
     for est, true in zip(estimation, annotation):
         if true > 0 and est > 0:
-            cents.append(1200 * np.log2((est / true) + eps))
+            cents.append(1200 * np.log2(est / true))
+
 
     errCentRms = np.sqrt(np.mean(np.power(np.array(cents), 2)))
     pfp = eval_voiced_fp(estimation, annotation)
@@ -329,6 +348,8 @@ def track_pitch(x, blockSize, hopSize, fs, method, voicingThres):
         f0, timeInSec = track_pitch_fftmax(x, blockSize, hopSize, fs)
     elif method == "hps":
         f0, timeInSec = track_pitch_hps(x, blockSize, hopSize, fs)
+    else:
+        print("no method specified")
 
     xb, _ = block_audio(x, blockSize, hopSize, fs)
     rmsDb = extract_rms(xb)
@@ -363,7 +384,9 @@ def e5():
                 onsets = txt_arr[:, 0]
                 f_true = txt_arr[:, 2]
                 f_est, timeInSec = track_pitch(y, 1024, 512, fs, tracker, threshold)
-
+                plt.plot(f_true, label="true")
+                plt.plot(f_est, label="est")
+                plt.show()
                 rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
                 print("RMS:", rms)
                 print("PFP:", pfp)
