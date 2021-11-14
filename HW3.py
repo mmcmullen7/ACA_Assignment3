@@ -146,22 +146,37 @@ def extract_rms(xb):
         vrms[n] = np.sqrt(np.dot(xb[n,:], xb[n,:]) / xb.shape[1])
     # convert to dB
     epsilon = 1e-5  # -100dB
-    vrms[vrms < epsilon] = epsilon
+    #vrms[vrms < epsilon] = epsilon
     rmsDb = 20 * np.log10(1/vrms)
     
-    return (rmsDb)    
+    return (rmsDb)  
+
+# def extract_rms(xb):
+#     K = xb.shape[0]
+#     rms_vec = np.zeros(K)
+#     for i, frame in enumerate(xb):
+#         ms = np.dot(frame, frame) / xb.shape[1]
+#         rms_vec[i] = np.sqrt(ms)
+
+#     # convert to db
+#     rms_vec_db = 20 * np.log10(rms_vec)
+
+#     # truncate to 100 dB
+#     #rms_vec_db[rms_vec_db > -100] = 100
+
+#     return rms_vec_db  
 
 def create_voicing_mask(rmsDb, thresholdDb):
     mask = rmsDb <= thresholdDb
     thresh_line = np.ones(rmsDb.shape[0]) * thresholdDb
 
-    fig, axs = plt.subplots(2)
-    axs[0].plot(rmsDb)
-    axs[0].plot(thresh_line)
-    axs[0].set_title("RMS")
-    axs[1].plot(mask)
-    axs[1].set_title(("Mask with threshold:" + str(thresholdDb)))
-    plt.show()
+    # fig, axs = plt.subplots(2)
+    # axs[0].plot(rmsDb)
+    # axs[0].plot(thresh_line)
+    # axs[0].set_title("RMS")
+    # axs[1].plot(mask)
+    # axs[1].set_title(("Mask with threshold:" + str(thresholdDb)))
+    # plt.show()
 
     #mask = np.argwhere(rmsDb <= thresholdDb)
     
@@ -227,7 +242,7 @@ def executeassign3():
     ref = np.zeros(len(f0))
     ref[:len(f0)//2 - 1] = 441
     ref[len(f0)//2 - 1 :] = 882
-    error = ref - f0
+    error = np.abs(ref - f0)
 
     fig, axs = plt.subplots(2)
     axs[0].plot(timeInSec, f0)
@@ -240,7 +255,7 @@ def executeassign3():
     plt.show()
 
     f0, timeInSec = track_pitch_hps(test_signal, blockSize, hopSize, fs)
-    error = ref - f0
+    error = np.abs(ref - f0)
     fig, axs = plt.subplots(2)
     axs[0].plot(timeInSec, f0)
     axs[0].plot(timeInSec, ref)
@@ -254,7 +269,7 @@ def executeassign3():
     blockSize = 2048
     hopSize = 512
     f0, timeInSec = track_pitch_fftmax(test_signal, blockSize, hopSize, fs)
-    error = ref - f0
+    error = np.abs(ref - f0)
 
     fig, axs = plt.subplots(2)
     axs[0].plot(timeInSec, f0)
@@ -266,27 +281,6 @@ def executeassign3():
     axs[1].set(xlabel=("Time in seconds"), ylabel=("Error in Hz"))
     plt.show()
 
-
-def run_evaluation(complete_path_to_data_folder):
-    wav_paths = []
-    txt_paths = []
-    for f_name in os.listdir(complete_path_to_data_folder):
-        if f_name.endswith(".wav"):
-            wav_paths.append(os.path.join(complete_path_to_data_folder, f_name))
-        elif f_name.endswith(".txt"):
-            txt_paths.append(os.path.join(complete_path_to_data_folder, f_name))
-
-    wav_paths.sort()
-    txt_paths.sort()
-
-    for wav, txt in zip(wav_paths, txt_paths):
-        fs, y = wavfile.read(wav)
-        txt_arr = np.loadtxt(txt)
-        onsets = txt_arr[:, 0]
-        f_true = txt_arr[:, 2]
-        f_est, timeInSec = track_pitch_acf(y, 1024, 512, fs)
-        rms = eval_pitchtrack(f_est, f_true)
-        print("RMS:", rms)
 
 def e3():
     complete_path_to_data_folder = "developmentSet/trainData/"
@@ -301,7 +295,11 @@ def e3():
     wav_paths.sort()
     txt_paths.sort()
 
-    for wav, txt in zip(wav_paths, txt_paths):
+    rms_eval = np.zeros(len(wav_paths))
+    pfp_eval = rms_eval.copy()
+    pfn_eval = rms_eval.copy()
+
+    for i, (wav, txt) in enumerate(zip(wav_paths, txt_paths)):
         fs, y = wavfile.read(wav)
         txt_arr = np.loadtxt(txt)
         onsets = txt_arr[:, 0]
@@ -309,9 +307,18 @@ def e3():
         f_est, timeInSec = track_pitch_fftmax(y, 1024, 512, fs)
 
         rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
-        print("RMS:", rms)
-        print("PFP:", pfp)
-        print("PFN:", pfn)
+
+        rms_eval[i] = rms
+        pfp_eval[i] = pfp
+        pfn_eval[i] = pfn
+
+    avg_rms = np.mean(rms_eval)
+    avg_pfp = np.mean(pfp_eval)
+    avg_pfn = np.mean(pfn_eval)
+
+    print("Average RMS:", avg_rms)
+    print("Average PFP:", avg_pfp)
+    print("Average PFN:", avg_pfn)
 
 
 def e4():
@@ -327,7 +334,11 @@ def e4():
     wav_paths.sort()
     txt_paths.sort()
 
-    for wav, txt in zip(wav_paths, txt_paths):
+    rms_eval = np.zeros(len(wav_paths))
+    pfp_eval = rms_eval.copy()
+    pfn_eval = rms_eval.copy()
+
+    for i, (wav, txt) in enumerate(zip(wav_paths, txt_paths)):
         fs, y = wavfile.read(wav)
         txt_arr = np.loadtxt(txt)
         onsets = txt_arr[:, 0]
@@ -335,11 +346,19 @@ def e4():
         f_est, timeInSec = track_pitch_hps(y, 1024, 512, fs)
 
         rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
-        print("RMS:", rms)
-        print("PFP:", pfp)
-        print("PFN:", pfn)
+        rms_eval[i] = rms
+        pfp_eval[i] = pfp
+        pfn_eval[i] = pfn
 
-    
+    avg_rms = np.mean(rms_eval)
+    avg_pfp = np.mean(pfp_eval)
+    avg_pfn = np.mean(pfn_eval)
+
+    print("Average RMS:", avg_rms)
+    print("Average PFP:", avg_pfp)
+    print("Average PFN:", avg_pfn)
+
+
 def track_pitch(x, blockSize, hopSize, fs, method, voicingThres):
 
     if method == "acf":
@@ -384,9 +403,9 @@ def e5():
                 onsets = txt_arr[:, 0]
                 f_true = txt_arr[:, 2]
                 f_est, timeInSec = track_pitch(y, 1024, 512, fs, tracker, threshold)
-                plt.plot(f_true, label="true")
-                plt.plot(f_est, label="est")
-                plt.show()
+                # plt.plot(f_true, label="true")
+                # plt.plot(f_est, label="est")
+                # plt.show()
                 rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
                 print("RMS:", rms)
                 print("PFP:", pfp)
