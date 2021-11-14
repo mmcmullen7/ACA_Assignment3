@@ -71,11 +71,6 @@ def track_pitch_fftmax(x, blockSize, hopSize, fs):
         block = X[:, n]
         maxNdx[n] = np.argmax(block)#np.argwhere(block == maxMag[n])
 
-    # Convert mask from float to integer
-    #maxNdx = np.int_(maxNdx)
-    # Apply mask to frequency vector to determine f0 (frequency of occurence of the maximum magnitude)
-    #f0 = fInHz[maxNdx]
-
     nyquist = fs/2
     f0 = nyquist * maxNdx / (X.shape[0] - 1)
     
@@ -144,27 +139,14 @@ def extract_rms(xb):
     for n in range(0, numBlocks):
         # calculate the rms
         vrms[n] = np.sqrt(np.dot(xb[n,:], xb[n,:]) / xb.shape[1])
-    # convert to dB
+
     epsilon = 1e-5  # -100dB
-    #vrms[vrms < epsilon] = epsilon
+    vrms[vrms < epsilon] = epsilon
     rmsDb = 20 * np.log10(1/vrms)
     
     return (rmsDb)  
 
-# def extract_rms(xb):
-#     K = xb.shape[0]
-#     rms_vec = np.zeros(K)
-#     for i, frame in enumerate(xb):
-#         ms = np.dot(frame, frame) / xb.shape[1]
-#         rms_vec[i] = np.sqrt(ms)
 
-#     # convert to db
-#     rms_vec_db = 20 * np.log10(rms_vec)
-
-#     # truncate to 100 dB
-#     #rms_vec_db[rms_vec_db > -100] = 100
-
-#     return rms_vec_db  
 
 def create_voicing_mask(rmsDb, thresholdDb):
     mask = rmsDb <= thresholdDb
@@ -177,8 +159,6 @@ def create_voicing_mask(rmsDb, thresholdDb):
     # axs[1].plot(mask)
     # axs[1].set_title(("Mask with threshold:" + str(thresholdDb)))
     # plt.show()
-
-    #mask = np.argwhere(rmsDb <= thresholdDb)
     
     return mask
 
@@ -186,11 +166,6 @@ def apply_voicing_mask(f0, mask):
     
     f0Adj = np.multiply(f0, mask)
 
-    #print("mask shape:", mask.shape)
-    #print("f0Adj shape:", f0Adj.shape)
-
-    #f0Adj[mask] = 0
-    
     return f0Adj
 
 def eval_voiced_fp(estimation, annotation):
@@ -377,7 +352,7 @@ def track_pitch(x, blockSize, hopSize, fs, method, voicingThres):
 
     return f0Adj, timeInSec
 
-def e5():
+def e6():
 
     complete_path_to_data_folder = "developmentSet/trainData/"
     wav_paths = []
