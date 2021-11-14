@@ -8,10 +8,14 @@ Created on Fri Nov  5 12:17:54 2021
 import numpy as np
 import math
 import scipy as sp
-from scipy.fft import fft
+from scipy.fftpack import fft
 from scipy.io import wavfile
+from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 import os
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 
@@ -27,6 +31,7 @@ def block_audio(x,blockSize,hopSize,fs):
         i_stop = np.min([x.size - 1, i_start + blockSize - 1])
         xb[n][np.arange(0,blockSize)] = x[np.arange(i_start, i_stop + 1)]
     return (xb,t)
+
 
 def compute_spectrogram(xb, fs):
     numBlocks = xb.shape[0]
@@ -63,12 +68,15 @@ def track_pitch_fftmax(x, blockSize, hopSize, fs):
     # Iterate through each block to find the index at which maximum occurs, fill in mask
     for n in range(0, X.shape[1]):
         block = X[:, n]
-        maxNdx[n] = np.argwhere(block == maxMag[n])
+        maxNdx[n] = np.argmax(block)#np.argwhere(block == maxMag[n])
 
     # Convert mask from float to integer
-    maxNdx = np.int_(maxNdx)
+    #maxNdx = np.int_(maxNdx)
     # Apply mask to frequency vector to determine f0 (frequency of occurence of the maximum magnitude)
-    f0 = fInHz[maxNdx]
+    #f0 = fInHz[maxNdx]
+
+    nyquist = fs/2
+    f0 = nyquist * maxNdx / X.shape[0] - 1
     
     return f0, timeInSec
 
@@ -95,6 +103,33 @@ def track_pitch_hps(x, blockSize, hopSize, fs):
 
     return f0, timeInSec
 
+def comp_acf(inputVector, blsNormalized=False):
+    inputVector = np.concatenate([np.zeros(len(inputVector)), inputVector])
+    # as discussed in class, autocorrelation in the time domain is multiplication with complex conjugate in freq domain
+    freq = np.fft.fft(inputVector)
+    r_freq = freq * np.conjugate(freq)
+    r = np.fft.ifft(r_freq).real
+    r = r[:len(r) // 2]
+
+    if blsNormalized:
+        r = r / np.max(np.abs(r))
+    return r
+
+
+def get_f0_from_acf(r, fs):
+    peaks, _ = find_peaks(r)
+
+    T = np.min(peaks) / fs
+    f0 = 1 / T
+    return f0
+
+def track_pitch_acf(x, blockSize, hopSize, fs):
+    xb, timeInSec = block_audio(x, blockSize, hopSize, fs)
+    f0 = np.zeros(len(xb))
+    for i, block in enumerate(xb):
+        r = comp_acf(block)
+        f0[i] = get_f0_from_acf(r, fs)
+    return f0, timeInSec
 
 def extract_rms(xb):
     # number of results
@@ -147,4 +182,189 @@ def eval_voiced_fn(estimation, annotation):
     return pfn
 
 
+def eval_pitchtrack_v2(estimation, annotation):
+    cents = []
+    eps = 1e-5
+    for est, true in zip(estimation, annotation):
+        if true > 0 and est > 0:
+            cents.append(1200 * np.log2((est / true) + eps))
+
+    errCentRms = np.sqrt(np.mean(np.power(np.array(cents), 2)))
+    pfp = eval_voiced_fp(estimation, annotation)
+    pfn = eval_voiced_fn(estimation, annotation)
+
+    return errCentRms, pfp, pfn  
+
+def executeassign3():
+    fs = 44100
+    blockSize = 1024
+    hopSize = 512
+
+    t = np.arange(0, fs) / fs
+    signal_1 = np.sin(2 * np.pi * 441 * t)
+    signal_2 = np.sin(2 * np.pi * 882 * t)
+    test_signal = np.concatenate([signal_1, signal_2])
+    f0, timeInSec = track_pitch_fftmax(test_signal, blockSize, hopSize, fs)
+    ref = np.zeros(len(f0))
+    ref[:len(f0)//2 - 1] = 441
+    ref[len(f0)//2 - 1 :] = 882
+    error = ref - f0
+
+    fig, axs = plt.subplots(2)
+    axs[0].plot(timeInSec, f0)
+    axs[0].plot(timeInSec, ref)
+    axs[0].set_title("Pitch from FFT Max")
+    axs[0].set(xlabel=("Time in seconds"), ylabel=("Frequency in Hz"))
+    axs[1].plot(timeInSec, error)
+    axs[1].set_title("Error in estimated pitch")
+    axs[1].set(xlabel=("Time in seconds"), ylabel=("Error in Hz"))
+    plt.show()
+
+    f0, timeInSec = track_pitch_hps(test_signal, blockSize, hopSize, fs)
+    error = ref - f0
+    fig, axs = plt.subplots(2)
+    axs[0].plot(timeInSec, f0)
+    axs[0].plot(timeInSec, ref)
+    axs[0].set_title("Pitch from HPS")
+    axs[0].set(xlabel=("Time in seconds"), ylabel=("Frequency in Hz"))
+    axs[1].plot(timeInSec, error)
+    axs[1].set_title("Error in estimated pitch")
+    axs[1].set(xlabel=("Time in seconds"), ylabel=("Error in Hz"))
+    plt.show()
+
+    blockSize = 2048
+    hopSize = 512
+    f0, timeInSec = track_pitch_fftmax(test_signal, blockSize, hopSize, fs)
+    error = ref - f0
+
+    fig, axs = plt.subplots(2)
+    axs[0].plot(timeInSec, f0)
+    axs[0].plot(timeInSec, ref)
+    axs[0].set_title("Pitch from FFT Max with increased block size")
+    axs[0].set(xlabel=("Time in seconds"), ylabel=("Frequency in Hz"))
+    axs[1].plot(timeInSec, error)
+    axs[1].set_title("Error in estimated pitch")
+    axs[1].set(xlabel=("Time in seconds"), ylabel=("Error in Hz"))
+    plt.show()
+
+
+def run_evaluation(complete_path_to_data_folder):
+    wav_paths = []
+    txt_paths = []
+    for f_name in os.listdir(complete_path_to_data_folder):
+        if f_name.endswith(".wav"):
+            wav_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+        elif f_name.endswith(".txt"):
+            txt_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+
+    wav_paths.sort()
+    txt_paths.sort()
+
+    for wav, txt in zip(wav_paths, txt_paths):
+        fs, y = wavfile.read(wav)
+        txt_arr = np.loadtxt(txt)
+        onsets = txt_arr[:, 0]
+        f_true = txt_arr[:, 2]
+        f_est, timeInSec = track_pitch_acf(y, 1024, 512, fs)
+        rms = eval_pitchtrack(f_est, f_true)
+        print("RMS:", rms)
+
+def e3():
+    complete_path_to_data_folder = "developmentSet/trainData/"
+    wav_paths = []
+    txt_paths = []
+    for f_name in os.listdir(complete_path_to_data_folder):
+        if f_name.endswith(".wav"):
+            wav_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+        elif f_name.endswith(".txt"):
+            txt_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+
+    wav_paths.sort()
+    txt_paths.sort()
+
+    for wav, txt in zip(wav_paths, txt_paths):
+        fs, y = wavfile.read(wav)
+        txt_arr = np.loadtxt(txt)
+        onsets = txt_arr[:, 0]
+        f_true = txt_arr[:, 2]
+        f_est, timeInSec = track_pitch_fftmax(y, 1024, 512, fs)
+
+        rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
+        print("RMS:", rms)
+        print("PFP:", pfp)
+        print("PFN:", pfn)
+
+
+def e4():
+    complete_path_to_data_folder = "developmentSet/trainData/"
+    wav_paths = []
+    txt_paths = []
+    for f_name in os.listdir(complete_path_to_data_folder):
+        if f_name.endswith(".wav"):
+            wav_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+        elif f_name.endswith(".txt"):
+            txt_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+
+    wav_paths.sort()
+    txt_paths.sort()
+
+    for wav, txt in zip(wav_paths, txt_paths):
+        fs, y = wavfile.read(wav)
+        txt_arr = np.loadtxt(txt)
+        onsets = txt_arr[:, 0]
+        f_true = txt_arr[:, 2]
+        f_est, timeInSec = track_pitch_hps(y, 1024, 512, fs)
+
+        rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
+        print("RMS:", rms)
+        print("PFP:", pfp)
+        print("PFN:", pfn)
+
     
+def track_pitch(x, blockSize, hopSize, fs, method, voicingThres):
+
+    if method == "acf":
+        f0, timeInSec = track_pitch_acf(x, blockSize, hopSize, fs)
+    elif method == "max":
+        f0, timeInSec = track_pitch_fftmax(x, blockSize, hopSize, fs)
+    elif method == "hps":
+        f0, timeInSec = track_pitch_hps(x, blockSize, hopSize, fs)
+
+    xb, _ = block_audio(x, blockSize, hopSize, fs)
+    rmsDb = extract_rms(xb)
+    mask = create_voicing_mask(rmsDb, voicingThres)
+    f0Adj = apply_voicing_mask(f0, mask)
+
+    return f0Adj, timeInSec
+
+def e5():
+
+    complete_path_to_data_folder = "developmentSet/trainData/"
+    wav_paths = []
+    txt_paths = []
+    for f_name in os.listdir(complete_path_to_data_folder):
+        if f_name.endswith(".wav"):
+            wav_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+        elif f_name.endswith(".txt"):
+            txt_paths.append(os.path.join(complete_path_to_data_folder, f_name))
+
+    wav_paths.sort()
+    txt_paths.sort()
+
+    trackers = ["acf", "max", "hps"]
+    thresholds = [-40, -20]
+
+    for tracker in trackers:
+        for threshold in thresholds:
+            for wav, txt in zip(wav_paths, txt_paths):
+                print("Tracking pitch for", wav, "using", tracker, "and threshold of", threshold)
+                fs, y = wavfile.read(wav)
+                txt_arr = np.loadtxt(txt)
+                onsets = txt_arr[:, 0]
+                f_true = txt_arr[:, 2]
+                f_est, timeInSec = track_pitch(y, 1024, 512, fs, tracker, threshold)
+
+                rms, pfp, pfn = eval_pitchtrack_v2(f_est, f_true)
+                print("RMS:", rms)
+                print("PFP:", pfp)
+                print("PFN:", pfn)
